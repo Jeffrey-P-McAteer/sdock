@@ -34,6 +34,9 @@ fn main() {
     while state.running {
         event_queue.blocking_dispatch(&mut state).unwrap();
     }
+
+    println!("Done goodbye!");
+
 }
 
 struct State {
@@ -57,6 +60,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         if let wl_registry::Event::Global { name, interface, .. } = event {
             match &interface[..] {
                 "wl_compositor" => {
+                    eprintln!("{}:{} got event name={} wl_compositor ", file!(), line!(), &name);
                     let compositor =
                         registry.bind::<wl_compositor::WlCompositor, _, _>(name, 1, qh, ());
                     let surface = compositor.create_surface(qh, ());
@@ -67,6 +71,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     }
                 }
                 "wl_shm" => {
+                    eprintln!("{}:{} got event name={} wl_shm ", file!(), line!(), &name);
+
                     let shm = registry.bind::<wl_shm::WlShm, _, _>(name, 1, qh, ());
 
                     let (init_w, init_h) = (320, 240);
@@ -92,9 +98,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     }
                 }
                 "wl_seat" => {
+                    eprintln!("{}:{} got event name={} wl_seat ", file!(), line!(), &name);
                     registry.bind::<wl_seat::WlSeat, _, _>(name, 1, qh, ());
                 }
                 "xdg_wm_base" => {
+                    eprintln!("{}:{} got event name={} xdg_wm_base ", file!(), line!(), &name);
                     let wm_base = registry.bind::<xdg_wm_base::XdgWmBase, _, _>(name, 1, qh, ());
                     state.wm_base = Some(wm_base);
 
@@ -102,7 +110,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                         state.init_xdg_surface(qh);
                     }
                 }
-                _ => {}
+                unk_name => {
+                    eprintln!("{}:{} got event name={} unk_name={} ", file!(), line!(), &name, &unk_name);
+                }
             }
         }
     }

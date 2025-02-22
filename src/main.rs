@@ -12,6 +12,9 @@ use wayland_client::{
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 fn main() {
+    std::thread::spawn(do_special_wm_configs);
+    std::thread::sleep(std::time::Duration::from_millis(20)); // Tiny delay to allow bg thread a chance to win race conditions
+
     let conn = Connection::connect_to_env().unwrap();
 
     let mut event_queue = conn.new_event_queue();
@@ -36,6 +39,15 @@ fn main() {
     }
 
     println!("Done goodbye!");
+
+}
+
+fn do_special_wm_configs() {
+    // Force sway to make the window float
+    //std::thread::sleep(std::time::Duration::from_millis(300));
+    let _s = std::process::Command::new("swaymsg")
+        .args(&["for_window [app_id=\"sdock\"] floating enable "])
+        .status();
 
 }
 
@@ -142,16 +154,29 @@ fn draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) {
 
 impl State {
     fn init_xdg_surface(&mut self, qh: &QueueHandle<State>) {
-        let wm_base = self.wm_base.as_ref().unwrap();
-        let base_surface = self.base_surface.as_ref().unwrap();
+        match self.wm_base.as_ref() {
+            Some(wm_base) => {
+                match self.base_surface.as_ref() {
+                    Some(base_surface) => {
+                        let xdg_surface = wm_base.get_xdg_surface(base_surface, qh, ());
+                        let toplevel = xdg_surface.get_toplevel(qh, ());
+                        // https://smithay.github.io/wayland-rs/wayland_protocols/xdg/shell/client/xdg_toplevel/struct.XdgToplevel.html#method.set_title
+                        toplevel.set_title("sdock".into());
+                        toplevel.set_app_id("sdock".into());
 
-        let xdg_surface = wm_base.get_xdg_surface(base_surface, qh, ());
-        let toplevel = xdg_surface.get_toplevel(qh, ());
-        toplevel.set_title("A fantastic window!".into());
+                        base_surface.commit();
 
-        base_surface.commit();
-
-        self.xdg_surface = Some((xdg_surface, toplevel));
+                        self.xdg_surface = Some((xdg_surface, toplevel));
+                    }
+                    None => {
+                        eprintln!("{}:{} self.base_surface.as_ref() returned None!", file!(), line!());
+                    }
+                }
+            }
+            None => {
+                eprintln!("{}:{} self.wm_base.as_ref() returned None!", file!(), line!());
+            }
+        }
     }
 }
 

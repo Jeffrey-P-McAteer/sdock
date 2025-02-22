@@ -46,7 +46,8 @@ fn do_special_wm_configs() {
     // Force sway to make the window float
     //std::thread::sleep(std::time::Duration::from_millis(300));
     let _s = std::process::Command::new("swaymsg")
-        .args(&["for_window [app_id=\"sdock\"] floating enable "])
+        // float, move resize to 100% by 12%, move to x=0, y=80%
+        .args(&["for_window [app_id=\"sdock\"] floating enable resize set width 100ppt height 12ppt move position 0 88ppt"])
         .status();
 
 }
@@ -243,6 +244,9 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
         if let wl_seat::Event::Capabilities { capabilities: WEnum::Value(capabilities) } = event {
             if capabilities.contains(wl_seat::Capability::Keyboard) {
                 seat.get_keyboard(qh, ());
+            }
+            if capabilities.contains(wl_seat::Capability::Pointer) {
+                //seat.get_pointer(qh, ());
             }
         }
     }

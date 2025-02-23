@@ -103,47 +103,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 }
                 "wl_shm" => {
                     eprintln!("{}:{} got event name={} wl_shm ", file!(), line!(), &name);
-
-                    let shm = registry.bind::<wl_shm::WlShm, _, _>(name, 1, qh, ());
-
-                    match tempfile::tempfile() {
-                        Ok(mut file) => {
-                            eprintln!("Drawing to memory at {:?}", file);
-
-                            let uw = state.configured_w as u32;
-                            let uh = state.configured_h as u32;
-
-                            draw(&mut file, (uw, uh));
-
-                            let pool = shm.create_pool(file.as_fd(), state.configured_w * state.configured_h * 4, qh, ()); // create_pool CANNOT take in a 0 value, invalid protocol use!
-
-                            let buffer = pool.create_buffer(
-                                0,
-                                state.configured_w,
-                                state.configured_h,
-                                state.configured_w * 4,
-                                wl_shm::Format::Argb8888,
-                                qh,
-                                (),
-                            );
-                            state.buffer = Some(buffer.clone());
-
-                            if state.configured {
-                                match state.base_surface.as_ref() {
-                                    Some(surface) => {
-                                        surface.attach(Some(&buffer), 0, 0);
-                                        surface.commit();
-                                    }
-                                    None => {
-                                        eprintln!("{}:{} state.base_surface.as_ref() is None", file!(), line!());
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("{}:{} {:?}", file!(), line!(), e);
-                        }
-                    }
+                    state.draw(name, registry, qh);
                 }
                 "wl_seat" => {
                     eprintln!("{}:{} got event name={} wl_seat ", file!(), line!(), &name);
@@ -157,6 +117,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     if state.base_surface.is_some() && state.xdg_surface.is_none() {
                         state.init_xdg_surface(qh);
                     }
+                }
+                "wl_output" => {
+                    eprintln!("{}:{} got event name={} wl_output ", file!(), line!(), &name);
+
+                    state.draw(1, registry, qh); // this doesn't violate protocol, but we shouldn't hard-code protocol numbers;;;
+
                 }
                 unk_name => {
                     eprintln!("{}:{} got event name={} unk_name={} ", file!(), line!(), &name, &unk_name);
@@ -173,7 +139,7 @@ delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
 
-fn draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) {
+fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
     use std::{cmp::min, io::Write};
     let mut buf = std::io::BufWriter::new(tmp);
     for y in 0..buf_y {
@@ -182,10 +148,11 @@ fn draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) {
             let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
             let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
             let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
-            buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).unwrap();
+            buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
         }
     }
-    buf.flush().unwrap();
+    buf.flush().map_err(err::eloc!())?;
+    Ok(())
 }
 
 impl State {
@@ -211,6 +178,50 @@ impl State {
             }
             None => {
                 eprintln!("{}:{} self.wm_base.as_ref() returned None!", file!(), line!());
+            }
+        }
+    }
+    fn draw(&mut self, name: u32, registry: &wl_registry::WlRegistry, qh: &QueueHandle<State>) {
+        let shm = registry.bind::<wl_shm::WlShm, _, _>(name, 1, qh, ());
+
+        match tempfile::tempfile() {
+            Ok(mut file) => {
+                eprintln!("Drawing to memory at {:?}", file);
+
+                let uw = self.configured_w as u32;
+                let uh = self.configured_h as u32;
+
+                if let Err(e) = static_draw(&mut file, (uw, uh)) {
+                    eprintln!("{:?}", e);
+                }
+
+                let pool = shm.create_pool(file.as_fd(), self.configured_w * self.configured_h * 4, qh, ()); // create_pool CANNOT take in a 0 value, invalid protocol use!
+
+                let buffer = pool.create_buffer(
+                    0,
+                    self.configured_w,
+                    self.configured_h,
+                    self.configured_w * 4,
+                    wl_shm::Format::Argb8888,
+                    qh,
+                    (),
+                );
+                self.buffer = Some(buffer.clone());
+
+                if self.configured {
+                    match self.base_surface.as_ref() {
+                        Some(surface) => {
+                            surface.attach(Some(&buffer), 0, 0);
+                            surface.commit();
+                        }
+                        None => {
+                            eprintln!("{}:{} self.base_surface.as_ref() is None", file!(), line!());
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{}:{} {:?}", file!(), line!(), e);
             }
         }
     }

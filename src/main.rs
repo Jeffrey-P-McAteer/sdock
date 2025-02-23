@@ -56,6 +56,8 @@ struct State {
     pub xdg_surface: Option<(xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel)>,
     pub configured: bool,
 
+    pub stolen_registry: Option<wl_registry::WlRegistry>,
+
     pub redraw_necessary: bool,
 
     // INVARIANT: width and height must ALWAYS be > 0
@@ -72,6 +74,7 @@ impl Default for State {
             wm_base: None,
             xdg_surface: None,
             configured: false,
+            stolen_registry: None,
             redraw_necessary: true,
             configured_h: 1,
             configured_w: 1,
@@ -88,6 +91,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
+        // Allows other methods to push things to the registry
+        state.stolen_registry = Some(registry.clone());
+
         if let wl_registry::Event::Global { name, interface, .. } = event {
             match &interface[..] {
                 "wl_compositor" => {
@@ -212,12 +218,16 @@ impl State {
                     match self.base_surface.as_ref() {
                         Some(surface) => {
                             surface.attach(Some(&buffer), 0, 0);
+                            surface.damage(0, 0, self.configured_w, self.configured_h);
                             surface.commit();
                         }
                         None => {
                             eprintln!("{}:{} self.base_surface.as_ref() is None", file!(), line!());
                         }
                     }
+                }
+                else {
+                    eprintln!("{}:{} We are not yet configured!", file!(), line!());
                 }
             }
             Err(e) => {
@@ -249,7 +259,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for State {
         event: xdg_surface::Event,
         _: &(),
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         if let xdg_surface::Event::Configure { serial, .. } = event {
             xdg_surface.ack_configure(serial);
@@ -257,7 +267,11 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for State {
             let surface = state.base_surface.as_ref().unwrap();
             if let Some(ref buffer) = state.buffer {
                 surface.attach(Some(buffer), 0, 0);
+                surface.damage(0, 0, 1, 1);
                 surface.commit();
+            }
+            if let Some(registry) = state.stolen_registry.clone() {
+                state.draw(1, &registry, qh);
             }
         }
         else {

@@ -47,7 +47,7 @@ fn do_special_wm_configs() {
     //std::thread::sleep(std::time::Duration::from_millis(300));
     let _s = std::process::Command::new("swaymsg")
         // float, move resize to 100% by 12%, move to x=0, y=80%
-        .args(&["for_window [app_id=\"sdock\"] floating enable, for_window [app_id=\"sdock\"] resize set width 100ppt height 12ppt, for_window [app_id=\"sdock\"] move position 0 88ppt"])
+        .args(&["for_window [app_id=\"sdock\"] floating enable, for_window [app_id=\"sdock\"] resize set width 100ppt height 9ppt, for_window [app_id=\"sdock\"] move position 0 92ppt"])
         .status();
 }
 
@@ -158,18 +158,42 @@ fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn
     let end_x = buf_x - dock_lr_margin;
 
     let dock_lip_h = 6;
-    let dock_angle_deg = 45;
+    let dock_angle_deg = 30;
+
+    // Used with: griffin-reader 'file_int_ex(45, "/tmp/a", lambda x: x-1)' 'file_int_ex(45, "/tmp/a", lambda x: x+1)'
+    //let contents = std::fs::read_to_string("/tmp/a")?;
+    //let dock_angle_deg = contents.parse::<i32>()?;
+
+    let dock_top_x_inset = f32::sin(dock_angle_deg as f32 * (180.0 as f32 / std::f32::consts::PI)) * buf_y as f32;
+    let dock_top_x_inset = dock_top_x_inset.abs();
+    // let dock_height = f32::sin(dock_angle_deg as f32 * (180.0 as f32 / std::f32::consts::PI)) as u32;
+
+    eprintln!("dock_top_x_inset = {:?}", dock_top_x_inset);
+
+    let mut dock_x_insets = vec![];
+    for y in 0..buf_y {
+        let ratio = (buf_y-y) as f32 / buf_y as f32;
+        dock_x_insets.push(
+            (dock_top_x_inset * ratio) as i32
+        );
+    }
+    eprintln!("dock_x_insets = {:?}", dock_x_insets);
 
     for y in 0..buf_y {
         for x in 0..begin_x {
             buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
         }
         for x in begin_x..end_x {
-            let a = 0xFF;
-            let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-            let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-            let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
-            buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+            if x > dock_x_insets[y as usize] as u32 + begin_x as u32 && x < end_x - dock_x_insets[y as usize] as u32 {
+                let a = 0xFF;
+                let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
+                buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+            }
+            else {
+                buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
+            }
         }
         for x in end_x..buf_x {
             buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;

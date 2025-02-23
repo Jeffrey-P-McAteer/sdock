@@ -11,7 +11,10 @@ use wayland_client::{
 
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
-fn main() {
+// Our modules
+mod err;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(do_special_wm_configs);
     std::thread::sleep(std::time::Duration::from_millis(20)); // Tiny delay to allow bg thread a chance to win race conditions
 
@@ -23,23 +26,17 @@ fn main() {
     let display = conn.display();
     display.get_registry(&qhandle, ());
 
-    let mut state = State {
-        running: true,
-        base_surface: None,
-        buffer: None,
-        wm_base: None,
-        xdg_surface: None,
-        configured: false,
-    };
+    let mut state = State::default();
 
     println!("Starting the example window app, press <ESC> to quit.");
 
     while state.running {
-        event_queue.blocking_dispatch(&mut state).unwrap();
+        event_queue.blocking_dispatch(&mut state).map_err(err::eloc!())?;
     }
 
     println!("Done goodbye!");
 
+    Ok(())
 }
 
 fn do_special_wm_configs() {
@@ -52,12 +49,34 @@ fn do_special_wm_configs() {
 }
 
 struct State {
-    running: bool,
-    base_surface: Option<wl_surface::WlSurface>,
-    buffer: Option<wl_buffer::WlBuffer>,
-    wm_base: Option<xdg_wm_base::XdgWmBase>,
-    xdg_surface: Option<(xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel)>,
-    configured: bool,
+    pub running: bool,
+    pub base_surface: Option<wl_surface::WlSurface>,
+    pub buffer: Option<wl_buffer::WlBuffer>,
+    pub wm_base: Option<xdg_wm_base::XdgWmBase>,
+    pub xdg_surface: Option<(xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel)>,
+    pub configured: bool,
+
+    pub redraw_necessary: bool,
+
+    // INVARIANT: width and height must ALWAYS be > 0
+    pub configured_w: i32,
+    pub configured_h: i32,
+}
+
+impl Default for State {
+     fn default() -> State {
+        State {
+            running: true,
+            base_surface: None,
+            buffer: None,
+            wm_base: None,
+            xdg_surface: None,
+            configured: false,
+            redraw_necessary: true,
+            configured_h: 1,
+            configured_w: 1,
+        }
+    }
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
@@ -87,26 +106,43 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
 
                     let shm = registry.bind::<wl_shm::WlShm, _, _>(name, 1, qh, ());
 
-                    let (init_w, init_h) = (320, 240);
+                    match tempfile::tempfile() {
+                        Ok(mut file) => {
+                            eprintln!("Drawing to memory at {:?}", file);
 
-                    let mut file = tempfile::tempfile().unwrap();
-                    draw(&mut file, (init_w, init_h));
-                    let pool = shm.create_pool(file.as_fd(), (init_w * init_h * 4) as i32, qh, ());
-                    let buffer = pool.create_buffer(
-                        0,
-                        init_w as i32,
-                        init_h as i32,
-                        (init_w * 4) as i32,
-                        wl_shm::Format::Argb8888,
-                        qh,
-                        (),
-                    );
-                    state.buffer = Some(buffer.clone());
+                            let uw = state.configured_w as u32;
+                            let uh = state.configured_h as u32;
 
-                    if state.configured {
-                        let surface = state.base_surface.as_ref().unwrap();
-                        surface.attach(Some(&buffer), 0, 0);
-                        surface.commit();
+                            draw(&mut file, (uw, uh));
+
+                            let pool = shm.create_pool(file.as_fd(), state.configured_w * state.configured_h * 4, qh, ()); // create_pool CANNOT take in a 0 value, invalid protocol use!
+
+                            let buffer = pool.create_buffer(
+                                0,
+                                state.configured_w,
+                                state.configured_h,
+                                state.configured_w * 4,
+                                wl_shm::Format::Argb8888,
+                                qh,
+                                (),
+                            );
+                            state.buffer = Some(buffer.clone());
+
+                            if state.configured {
+                                match state.base_surface.as_ref() {
+                                    Some(surface) => {
+                                        surface.attach(Some(&buffer), 0, 0);
+                                        surface.commit();
+                                    }
+                                    None => {
+                                        eprintln!("{}:{} state.base_surface.as_ref() is None", file!(), line!());
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("{}:{} {:?}", file!(), line!(), e);
+                        }
                     }
                 }
                 "wl_seat" => {
@@ -213,6 +249,9 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for State {
                 surface.commit();
             }
         }
+        else {
+            eprintln!("Ignoring Dispatch<xdg_surface::XdgSurface, ()> for State event {:?}", event);
+        }
     }
 }
 
@@ -227,6 +266,20 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for State {
     ) {
         if let xdg_toplevel::Event::Close {} = event {
             state.running = false;
+        }
+        if let xdg_toplevel::Event::Configure { width, height, states: _ } = event {
+            if width != state.configured_w || height != state.configured_h {
+                state.redraw_necessary = true;
+            }
+            if width > 0 {
+                state.configured_w = width;
+            }
+            if height > 0 {
+                state.configured_h = height;
+            }
+        }
+        else {
+            eprintln!("Ignoring Dispatch<xdg_toplevel::XdgToplevel, ()> for State event {:?}", event);
         }
     }
 }
@@ -247,6 +300,9 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
             if capabilities.contains(wl_seat::Capability::Pointer) {
                 //seat.get_pointer(qh, ());
             }
+        }
+        else {
+            eprintln!("Ignoring Dispatch<wl_seat::WlSeat, ()> for State event {:?}", event);
         }
     }
 }

@@ -6,7 +6,7 @@ use std::{fs::File, os::unix::io::AsFd};
 use wayland_client::{
     delegate_noop,
     protocol::{
-        wl_buffer, wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_shm, wl_shm_pool,
+        wl_buffer, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool,
         wl_surface,
     },
     Connection, Dispatch, QueueHandle, WEnum,
@@ -291,6 +291,7 @@ impl Dispatch<xdg_wm_base::XdgWmBase, ()> for State {
         if let xdg_wm_base::Event::Ping { serial } = event {
             wm_base.pong(serial);
         }
+        eprintln!("Got Dispatch<xdg_wm_base::XdgWmBase, ()> {:?}", event);
     }
 }
 
@@ -306,14 +307,16 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for State {
         if let xdg_surface::Event::Configure { serial, .. } = event {
             xdg_surface.ack_configure(serial);
             state.configured = true;
-            let surface = state.base_surface.as_ref().unwrap();
-            if let Some(ref buffer) = state.buffer {
-                surface.attach(Some(buffer), 0, 0);
-                surface.damage(0, 0, 1, 1);
-                surface.commit();
-            }
             if let Some(registry) = state.stolen_registry.clone() {
                 state.draw(1, &registry, qh);
+            }
+            else {
+                let surface = state.base_surface.as_ref().unwrap();
+                if let Some(ref buffer) = state.buffer {
+                    surface.attach(Some(buffer), 0, 0);
+                    surface.damage(0, 0, 1, 1);
+                    surface.commit();
+                }
             }
         }
         else {
@@ -344,6 +347,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for State {
             if height > 0 {
                 state.configured_h = height;
             }
+            eprintln!("Got xdg_toplevel::Event::Configure {:?}", event);
         }
         else {
             eprintln!("Ignoring Dispatch<xdg_toplevel::XdgToplevel, ()> for State event {:?}", event);
@@ -365,8 +369,9 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
                 seat.get_keyboard(qh, ());
             }
             if capabilities.contains(wl_seat::Capability::Pointer) {
-                //seat.get_pointer(qh, ());
+                seat.get_pointer(qh, ());
             }
+            eprintln!("Got wl_seat::Event::Capabilities {:?}", event);
         }
         else {
             eprintln!("Ignoring Dispatch<wl_seat::WlSeat, ()> for State event {:?}", event);
@@ -389,5 +394,25 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
                 state.running = false;
             }
         }
+        eprintln!("Got Dispatch<wl_keyboard::WlKeyboard, ()> {:?}", event);
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        /*if let wl_pointer::Event::Key { key, .. } = event {
+            if key == 1 {
+                // ESC key
+                state.running = false;
+            }
+        }*/
+        eprintln!("Got Dispatch<wl_pointer::WlPointer, ()> {:?}", event);
     }
 }

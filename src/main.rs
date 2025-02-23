@@ -35,6 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while state.running {
         event_queue.blocking_dispatch(&mut state).map_err(err::eloc!())?;
+        // TODO determine based on window positions if drawing is appropriate; this loop runs _ALL_THE_TIME_
+        state.draw_from_stolen();
     }
 
     println!("Done goodbye!");
@@ -60,12 +62,15 @@ struct State {
     pub configured: bool,
 
     pub stolen_registry: Option<wl_registry::WlRegistry>,
+    pub stolen_qh: Option<QueueHandle<State>>,
 
     pub redraw_necessary: bool,
 
     // INVARIANT: width and height must ALWAYS be > 0
     pub configured_w: i32,
     pub configured_h: i32,
+
+    pub draw_t_jh: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Default for State {
@@ -78,9 +83,11 @@ impl Default for State {
             xdg_surface: None,
             configured: false,
             stolen_registry: None,
+            stolen_qh: None,
             redraw_necessary: true,
             configured_h: 1,
             configured_w: 1,
+            draw_t_jh: None,
         }
     }
 }
@@ -96,6 +103,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
     ) {
         // Allows other methods to push things to the registry
         state.stolen_registry = Some(registry.clone());
+        state.stolen_qh = Some(qh.clone());
 
         if let wl_registry::Event::Global { name, interface, .. } = event {
             match &interface[..] {
@@ -274,6 +282,15 @@ impl State {
             }
             Err(e) => {
                 eprintln!("{}:{} {:?}", file!(), line!(), e);
+            }
+        }
+
+    }
+
+    pub fn draw_from_stolen(&mut self) {
+        if let Some(registry) = self.stolen_registry.clone() { // ugh .clones
+            if let Some(qh) = self.stolen_qh.clone() {
+                self.draw(1, &registry, &qh);
             }
         }
     }

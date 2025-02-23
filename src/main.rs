@@ -47,9 +47,8 @@ fn do_special_wm_configs() {
     //std::thread::sleep(std::time::Duration::from_millis(300));
     let _s = std::process::Command::new("swaymsg")
         // float, move resize to 100% by 12%, move to x=0, y=80%
-        .args(&["for_window [app_id=\"sdock\"] floating enable resize set width 100ppt height 12ppt move position 0 88ppt"])
+        .args(&["for_window [app_id=\"sdock\"] floating enable, for_window [app_id=\"sdock\"] resize set width 100ppt height 12ppt, for_window [app_id=\"sdock\"] move position 0 88ppt"])
         .status();
-
 }
 
 struct State {

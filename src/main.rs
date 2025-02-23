@@ -1,3 +1,6 @@
+
+#![allow(dead_code, unused_variables, unused_imports)]
+
 use std::{fs::File, os::unix::io::AsFd};
 
 use wayland_client::{
@@ -148,13 +151,27 @@ delegate_noop!(State: ignore wl_buffer::WlBuffer);
 fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
     use std::{cmp::min, io::Write};
     let mut buf = std::io::BufWriter::new(tmp);
+
+    let dock_w = buf_x / 2;
+    let dock_lr_margin = (buf_x - dock_w) / 2;
+    let begin_x = dock_lr_margin;
+    let end_x = buf_x - dock_lr_margin;
+
+    let dock_lip_h = 6;
+
     for y in 0..buf_y {
-        for x in 0..buf_x {
+        for x in 0..begin_x {
+            buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
+        }
+        for x in begin_x..end_x {
             let a = 0xFF;
             let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
             let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
             let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
             buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+        }
+        for x in end_x..buf_x {
+            buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
         }
     }
     buf.flush().map_err(err::eloc!())?;

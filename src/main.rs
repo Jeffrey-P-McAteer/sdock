@@ -407,12 +407,17 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        /*if let wl_pointer::Event::Key { key, .. } = event {
-            if key == 1 {
-                // ESC key
-                state.running = false;
+        if let wl_pointer::Event::Motion { .. } = event {
+            let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis();
+            if now_ms % 50 == 0 {
+                eprintln!("Got Dispatch<wl_pointer::WlPointer, ()> {:?}", event);
             }
-        }*/
-        eprintln!("Got Dispatch<wl_pointer::WlPointer, ()> {:?}", event);
+        }
+        else {
+            eprintln!("Got Dispatch<wl_pointer::WlPointer, ()> {:?}", event);
+        }
     }
 }

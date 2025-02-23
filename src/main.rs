@@ -158,6 +158,7 @@ fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn
     let end_x = buf_x - dock_lr_margin;
 
     let dock_lip_h = 6;
+    let dock_angle_deg = 45;
 
     for y in 0..buf_y {
         for x in 0..begin_x {

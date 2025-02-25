@@ -16,6 +16,7 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 
 // Our modules
 mod err;
+mod util;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(do_special_wm_configs);
@@ -273,8 +274,9 @@ impl State {
     fn draw(&mut self, name: u32, registry: &wl_registry::WlRegistry, qh: &QueueHandle<State>) {
         let shm = registry.bind::<wl_shm::WlShm, _, _>(name, 1, qh, ());
 
-        match tempfile::tempfile() {
-            Ok(mut file) => {
+        match util::create_shm_fd() {
+            Ok(owned_file) => {
+                let mut file = std::fs::File::from(owned_file);
                 eprintln!("Drawing to memory at {:?}", file);
 
                 let uw = self.configured_w as u32;
@@ -329,6 +331,7 @@ impl State {
     }
 
     pub fn take_screenshot(&mut self) {
+        eprintln!("Begin take_screenshot");
         let dock_w = self.configured_w / 2;
         let dock_lr_margin = (self.configured_w - dock_w) / 2;
         let begin_x = dock_lr_margin;

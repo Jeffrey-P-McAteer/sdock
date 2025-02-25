@@ -31,12 +31,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = State::default();
 
+    let mut haruhi_shot_init_retries = 9;
+    while haruhi_shot_init_retries > 0 {
+        if let Err(ref e) = state.haruhi_shot {
+            haruhi_shot_init_retries -= 1;
+            eprintln!("WARNING: Failed to init HaruhiShotState, {} retries remaining: {:?}", haruhi_shot_init_retries, e);
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            state.haruhi_shot = libharuhishot::HaruhiShotState::init();
+        }
+        else {
+            break; // we got it, yay!
+        }
+    }
+
     println!("Starting the example window app, press <ESC> to quit.");
 
     while state.running {
         event_queue.blocking_dispatch(&mut state).map_err(err::eloc!())?;
         // TODO determine based on window positions if drawing is appropriate; this loop runs _ALL_THE_TIME_
         state.draw_from_stolen();
+        state.take_screenshot(); // Queue error; libharuhi is also maintaining a connection; can we send ours to it so they can share?
     }
 
     println!("Done goodbye!");
@@ -70,7 +84,8 @@ struct State {
     pub configured_w: i32,
     pub configured_h: i32,
 
-    pub draw_t_jh: Option<std::thread::JoinHandle<()>>,
+    pub haruhi_shot: Result<libharuhishot::HaruhiShotState, libharuhishot::haruhierror::HaruhiError>,
+    pub last_screenshot_px: Vec::<[u8; 4]>,
 }
 
 impl Default for State {
@@ -87,7 +102,8 @@ impl Default for State {
             redraw_necessary: true,
             configured_h: 1,
             configured_w: 1,
-            draw_t_jh: None,
+            haruhi_shot: libharuhishot::HaruhiShotState::init(),
+            last_screenshot_px: vec![],
         }
     }
 }
@@ -156,7 +172,7 @@ delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
 
-fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
+fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
     use std::{cmp::min, io::Write};
     let mut buf = std::io::BufWriter::new(tmp);
 
@@ -164,6 +180,10 @@ fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn
     let dock_lr_margin = (buf_x - dock_w) / 2;
     let begin_x = dock_lr_margin;
     let end_x = buf_x - dock_lr_margin;
+
+    let screenshot_y_above_dock_dist = buf_y; // We capture 2x the dock's height; no need for entire screen!
+
+    // Compute dock detailed geometry
 
     let dock_lip_h = 6;
     let dock_angle_deg = 30;
@@ -176,7 +196,7 @@ fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn
     let dock_top_x_inset = dock_top_x_inset.abs();
     // let dock_height = f32::sin(dock_angle_deg as f32 * (180.0 as f32 / std::f32::consts::PI)) as u32;
 
-    eprintln!("dock_top_x_inset = {:?}", dock_top_x_inset);
+    //eprintln!("dock_top_x_inset = {:?}", dock_top_x_inset);
 
     let mut dock_x_insets = vec![];
     for y in 0..buf_y {
@@ -185,7 +205,7 @@ fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn
             (dock_top_x_inset * ratio) as i32
         );
     }
-    eprintln!("dock_x_insets = {:?}", dock_x_insets);
+    //eprintln!("dock_x_insets = {:?}", dock_x_insets);
 
     for y in 0..buf_y {
         for x in 0..begin_x {
@@ -193,11 +213,24 @@ fn static_draw(tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn
         }
         for x in begin_x..end_x {
             if x > dock_x_insets[y as usize] as u32 + begin_x as u32 && x < end_x - dock_x_insets[y as usize] as u32 {
+                /*
                 let a = 0xFF;
                 let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
                 let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
                 let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
                 buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+                */
+                let screenshot_px_i = ((y * dock_w) + x) as usize;
+                if screenshot_px_i < screenshot_px.len() {
+                    buf.write_all(&screenshot_px[screenshot_px_i]).map_err(err::eloc!())?;
+                }
+                else {
+                    let a = 0xFF;
+                    let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                    let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                    let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
+                    buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+                }
             }
             else {
                 buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
@@ -247,7 +280,7 @@ impl State {
                 let uw = self.configured_w as u32;
                 let uh = self.configured_h as u32;
 
-                if let Err(e) = static_draw(&mut file, (uw, uh)) {
+                if let Err(e) = static_draw(&self.last_screenshot_px, &mut file, (uw, uh)) {
                     eprintln!("{:?}", e);
                 }
 
@@ -294,6 +327,49 @@ impl State {
             }
         }
     }
+
+    pub fn take_screenshot(&mut self) {
+        let dock_w = self.configured_w / 2;
+        let dock_lr_margin = (self.configured_w - dock_w) / 2;
+        let begin_x = dock_lr_margin;
+        let end_x = self.configured_w - dock_lr_margin;
+
+        let screenshot_y_above_dock_dist = self.configured_h; // We capture 2x the dock's height; no need for entire screen!
+
+        let mut screenshot_px = Vec::<[u8; 4]>::new(); // Screenshot turns into array of [b as u8, g as u8, r as u8, a as u8] values
+        if let Ok(ref mut haruhi_shot) = self.haruhi_shot {
+            match haruhi_shot.capture_output_frame(
+                &haruhi_shot.displays[0].clone(),
+                (dock_w as i32, (self.configured_h + screenshot_y_above_dock_dist) as i32), // output w,h
+                haruhi_shot.display_transform[0],
+                Some((
+                    begin_x as i32, haruhi_shot.display_logic_size[0].1 - (self.configured_h + screenshot_y_above_dock_dist) as i32, // x,y
+                    dock_w as i32, (self.configured_h + screenshot_y_above_dock_dist) as i32 // w,h
+                ))
+            ) {
+                Ok(Some(frame_buff_info)) => {
+                    // Map it and draw into screenshot_px
+                    eprintln!("frame_buff_info.realheight = {} frame_buff_info.realwidth = {}", frame_buff_info.realheight, frame_buff_info.realwidth);
+                    for y in 0..frame_buff_info.realheight {
+                        for x in 0..frame_buff_info.realwidth {
+
+                            screenshot_px.push([
+                                0 as u8, 0 as u8, 0 as u8, 0 as u8
+                            ]);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    eprintln!("{}:{} success but no frame data returned to us!", file!(), line!());
+                }
+                Err(e) => {
+                    eprintln!("{}:{} {:?}", file!(), line!(), e);
+                }
+            }
+        }
+        eprintln!("screenshot_px.len() = {}", screenshot_px.len());
+    }
+
 }
 
 impl Dispatch<xdg_wm_base::XdgWmBase, ()> for State {

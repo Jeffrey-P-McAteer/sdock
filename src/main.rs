@@ -362,6 +362,12 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
     }
 
     const SHADOW_W_PX: i32 = 16;
+    const METAL_TEXTURE_OVLY: [u8; 16] = [
+        8,  12, 16, 12,
+        4,  8,  12,  8,
+        8,  4,  8,   4,
+        12, 8,  12,  8,
+    ];
 
     for y in 0..buf_y {
         for x in 0..begin_x {
@@ -390,8 +396,25 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
                     let screenshot_reflected_y = screenshot_y_above_dock_dist - y;
                     let x_correction_amount = (dock_w / 2) + 6; // Ok genius where are we being offset by w/2 and six pixels?!/???
                     let screenshot_px_i = ((screenshot_reflected_y * dock_w) + x + x_correction_amount) as usize;
+
+                    let metal_overlay_val = METAL_TEXTURE_OVLY[(((y % 4) * 4) + (x % 4)) as usize];
+
                     if screenshot_px_i > 0 && screenshot_px_i < screenshot_px.len() {
-                        buf.write_all(&screenshot_px[screenshot_px_i]).map_err(err::eloc!())?;
+                        let mut b = screenshot_px[screenshot_px_i][0];
+                        let mut g = screenshot_px[screenshot_px_i][1];
+                        let mut r = screenshot_px[screenshot_px_i][2];
+
+                        if b > metal_overlay_val {
+                            b -= metal_overlay_val;
+                        }
+                        if g > metal_overlay_val {
+                            g -= metal_overlay_val;
+                        }
+                        if r > metal_overlay_val {
+                            r -= metal_overlay_val;
+                        }
+
+                        buf.write_all(&[b, g, r, 0xFF as u8]).map_err(err::eloc!())?;
                     }
                     else {
                         let a = 0xE0;

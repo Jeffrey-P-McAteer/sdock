@@ -174,78 +174,6 @@ delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
 
-fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
-    use std::{cmp::min, io::Write};
-    let mut buf = std::io::BufWriter::new(tmp);
-
-    let dock_w = buf_x / 2;
-    let dock_lr_margin = (buf_x - dock_w) / 2;
-    let begin_x = dock_lr_margin;
-    let end_x = buf_x - dock_lr_margin;
-
-    let screenshot_y_above_dock_dist = buf_y; // We capture 2x the dock's height; no need for entire screen!
-
-    // Compute dock detailed geometry
-
-    let dock_lip_h = 6;
-    let dock_angle_deg = 30;
-
-    // Used with: griffin-reader 'file_int_ex(45, "/tmp/a", lambda x: x-1)' 'file_int_ex(45, "/tmp/a", lambda x: x+1)'
-    //let contents = std::fs::read_to_string("/tmp/a")?;
-    //let dock_angle_deg = contents.parse::<i32>()?;
-
-    let dock_top_x_inset = f32::sin(dock_angle_deg as f32 * (180.0 as f32 / std::f32::consts::PI)) * buf_y as f32;
-    let dock_top_x_inset = dock_top_x_inset.abs();
-    // let dock_height = f32::sin(dock_angle_deg as f32 * (180.0 as f32 / std::f32::consts::PI)) as u32;
-
-    //eprintln!("dock_top_x_inset = {:?}", dock_top_x_inset);
-
-    let mut dock_x_insets = vec![];
-    for y in 0..buf_y {
-        let ratio = (buf_y-y) as f32 / buf_y as f32;
-        dock_x_insets.push(
-            (dock_top_x_inset * ratio) as i32
-        );
-    }
-    //eprintln!("dock_x_insets = {:?}", dock_x_insets);
-
-    for y in 0..buf_y {
-        for x in 0..begin_x {
-            buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
-        }
-        for x in begin_x..end_x {
-            if x > dock_x_insets[y as usize] as u32 + begin_x as u32 && x < end_x - dock_x_insets[y as usize] as u32 {
-                /*
-                let a = 0xFF;
-                let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-                let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-                let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
-                buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
-                */
-                let screenshot_px_i = ((( (screenshot_y_above_dock_dist) - y) * dock_w) + x) as usize;
-                if screenshot_px_i > 0 && screenshot_px_i < screenshot_px.len() {
-                    buf.write_all(&screenshot_px[screenshot_px_i]).map_err(err::eloc!())?;
-                }
-                else {
-                    let a = 0xFF;
-                    let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-                    let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-                    let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
-                    buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
-                }
-            }
-            else {
-                buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
-            }
-        }
-        for x in end_x..buf_x {
-            buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
-        }
-    }
-    buf.flush().map_err(err::eloc!())?;
-    Ok(())
-}
-
 impl State {
     fn init_xdg_surface(&mut self, qh: &QueueHandle<State>) {
         match self.wm_base.as_ref() {
@@ -360,22 +288,10 @@ impl State {
                     // Map it and draw into screenshot_px
                     let frame_px =  frame_buff_info.frame_mmap;
                     if frame_buff_info.frameformat.format == libharuhishot::reexport::Format::Xbgr8888 {
-                        // "Component size"
-                        let cs = (frame_buff_info.frameformat.width * frame_buff_info.frameformat.height) as usize;
                         for y in 0..frame_buff_info.frameformat.height {
                             for x in 0..frame_buff_info.frameformat.width {
                                 let frame_px_i = (((y * frame_buff_info.frameformat.width) + x) * 4) as usize;
 
-                                // "Component offset"
-                                let co = ((y * frame_buff_info.frameformat.width) + x) as usize;
-
-                                // screenshot_px Pixel values in format [b, g, r, a]
-                                /*screenshot_px.push([
-                                    frame_px[(cs * 0) + co],
-                                    frame_px[(cs * 1) + co],
-                                    frame_px[(cs * 2) + co],
-                                    0xFF as u8
-                                ]);*/
                                 screenshot_px.push([
                                     frame_px[frame_px_i+2],
                                     frame_px[frame_px_i+1],
@@ -409,6 +325,76 @@ impl State {
     }
 
 }
+
+
+fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
+    use std::{cmp::min, io::Write};
+    let mut buf = std::io::BufWriter::new(tmp);
+
+    let dock_w = buf_x / 2;
+    let dock_lr_margin = (buf_x - dock_w) / 2;
+    let begin_x = dock_lr_margin;
+    let end_x = buf_x - dock_lr_margin;
+
+    let screenshot_y_above_dock_dist = buf_y; // We capture 2x the dock's height; no need for entire screen!
+
+    // Compute dock detailed geometry
+
+    let dock_lip_h = 6;
+    let dock_angle_deg = 30;
+
+    // Used with: griffin-reader 'file_int_ex(45, "/tmp/a", lambda x: x-1)' 'file_int_ex(45, "/tmp/a", lambda x: x+1)'
+    //let contents = std::fs::read_to_string("/tmp/a")?;
+    //let dock_angle_deg = contents.parse::<i32>()?;
+
+    let dock_top_x_inset = f32::sin(dock_angle_deg as f32 * (180.0 as f32 / std::f32::consts::PI)) * buf_y as f32;
+    let dock_top_x_inset = dock_top_x_inset.abs();
+    // let dock_height = f32::sin(dock_angle_deg as f32 * (180.0 as f32 / std::f32::consts::PI)) as u32;
+
+    //eprintln!("dock_top_x_inset = {:?}", dock_top_x_inset);
+
+    let mut dock_x_insets = vec![];
+    for y in 0..buf_y {
+        let ratio = (buf_y-y) as f32 / buf_y as f32;
+        dock_x_insets.push(
+            (dock_top_x_inset * ratio) as i32
+        );
+    }
+    //eprintln!("dock_x_insets = {:?}", dock_x_insets);
+
+    for y in 0..buf_y {
+        for x in 0..begin_x {
+            buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
+        }
+        for x in begin_x..end_x {
+            if x > dock_x_insets[y as usize] as u32 + begin_x as u32 && x < end_x - dock_x_insets[y as usize] as u32 {
+                let screenshot_reflected_y = screenshot_y_above_dock_dist - y;
+                let x_correction_amount = (dock_w / 2) + 6; // Ok genius where are we being offset by w/2 and six pixels?!/???
+                let screenshot_px_i = ((screenshot_reflected_y * dock_w) + x + x_correction_amount) as usize;
+                if screenshot_px_i > 0 && screenshot_px_i < screenshot_px.len() {
+                    buf.write_all(&screenshot_px[screenshot_px_i]).map_err(err::eloc!())?;
+                }
+                else {
+                    let a = 0xE0;
+                    let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                    let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                    let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
+                    buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+                }
+            }
+            else {
+                buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
+            }
+        }
+        for x in end_x..buf_x {
+            buf.write_all(&[0 as u8, 0 as u8, 0 as u8, 0 as u8]).map_err(err::eloc!())?;
+        }
+    }
+    buf.flush().map_err(err::eloc!())?;
+    Ok(())
+}
+
+
 
 impl Dispatch<xdg_wm_base::XdgWmBase, ()> for State {
     fn event(

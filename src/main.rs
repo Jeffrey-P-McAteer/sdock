@@ -50,8 +50,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while state.running {
         event_queue.blocking_dispatch(&mut state).map_err(err::eloc!())?;
         // TODO determine based on window positions if drawing is appropriate; this loop runs _ALL_THE_TIME_
-        state.draw_from_stolen();
         state.take_screenshot(); // Queue error; libharuhi is also maintaining a connection; can we send ours to it so they can share?
+        state.draw_from_stolen();
     }
 
     println!("Done goodbye!");
@@ -63,8 +63,8 @@ fn do_special_wm_configs() {
     // Force sway to make the window float
     //std::thread::sleep(std::time::Duration::from_millis(300));
     let _s = std::process::Command::new("swaymsg")
-        // float, move resize to 100% by 12%, move to x=0, y=80%
-        .args(&["for_window [app_id=\"sdock\"] floating enable, for_window [app_id=\"sdock\"] resize set width 100ppt height 9ppt, for_window [app_id=\"sdock\"] move position 0 92ppt"])
+        // float, move resize to 100% by 12%, move to x=0, y=80% // sticky enable
+        .args(&["for_window [app_id=\"sdock\"] floating enable, for_window [app_id=\"sdock\"] resize set width 100ppt height 9ppt, for_window [app_id=\"sdock\"] move position 0 92ppt, for_window [app_id=\"sdock\"] sticky enable"])
         .status();
 }
 
@@ -86,6 +86,7 @@ struct State {
     pub configured_h: i32,
 
     pub haruhi_shot: Result<libharuhishot::HaruhiShotState, libharuhishot::haruhierror::HaruhiError>,
+    // Pixel values in format [b, g, r, a]
     pub last_screenshot_px: Vec::<[u8; 4]>,
 }
 
@@ -221,8 +222,8 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
                 let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
                 buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
                 */
-                let screenshot_px_i = ((y * dock_w) + x) as usize;
-                if screenshot_px_i < screenshot_px.len() {
+                let screenshot_px_i = ((( (screenshot_y_above_dock_dist) - y) * dock_w) + x) as usize;
+                if screenshot_px_i > 0 && screenshot_px_i < screenshot_px.len() {
                     buf.write_all(&screenshot_px[screenshot_px_i]).map_err(err::eloc!())?;
                 }
                 else {
@@ -332,12 +333,17 @@ impl State {
 
     pub fn take_screenshot(&mut self) {
         eprintln!("Begin take_screenshot");
+        if self.configured_w < 4 || self.configured_h < 4 {
+            return; // invalid to take screenshot 0x0 in size
+        }
         let dock_w = self.configured_w / 2;
         let dock_lr_margin = (self.configured_w - dock_w) / 2;
         let begin_x = dock_lr_margin;
         let end_x = self.configured_w - dock_lr_margin;
 
         let screenshot_y_above_dock_dist = self.configured_h; // We capture 2x the dock's height; no need for entire screen!
+
+        //eprintln!("size = {:?}", (dock_w as i32, (self.configured_h + screenshot_y_above_dock_dist) as i32));
 
         let mut screenshot_px = Vec::<[u8; 4]>::new(); // Screenshot turns into array of [b as u8, g as u8, r as u8, a as u8] values
         if let Ok(ref mut haruhi_shot) = self.haruhi_shot {
@@ -352,14 +358,38 @@ impl State {
             ) {
                 Ok(Some(frame_buff_info)) => {
                     // Map it and draw into screenshot_px
-                    eprintln!("frame_buff_info.realheight = {} frame_buff_info.realwidth = {}", frame_buff_info.realheight, frame_buff_info.realwidth);
-                    for y in 0..frame_buff_info.realheight {
-                        for x in 0..frame_buff_info.realwidth {
+                    let frame_px =  frame_buff_info.frame_mmap;
+                    if frame_buff_info.frameformat.format == libharuhishot::reexport::Format::Xbgr8888 {
+                        // "Component size"
+                        let cs = (frame_buff_info.frameformat.width * frame_buff_info.frameformat.height) as usize;
+                        for y in 0..frame_buff_info.frameformat.height {
+                            for x in 0..frame_buff_info.frameformat.width {
+                                let frame_px_i = (((y * frame_buff_info.frameformat.width) + x) * 4) as usize;
 
-                            screenshot_px.push([
-                                0 as u8, 0 as u8, 0 as u8, 0 as u8
-                            ]);
+                                // "Component offset"
+                                let co = ((y * frame_buff_info.frameformat.width) + x) as usize;
+
+                                // screenshot_px Pixel values in format [b, g, r, a]
+                                /*screenshot_px.push([
+                                    frame_px[(cs * 0) + co],
+                                    frame_px[(cs * 1) + co],
+                                    frame_px[(cs * 2) + co],
+                                    0xFF as u8
+                                ]);*/
+                                screenshot_px.push([
+                                    frame_px[frame_px_i+2],
+                                    frame_px[frame_px_i+1],
+                                    frame_px[frame_px_i+0],
+                                    0xFF as u8
+                                ]);
+                            }
                         }
+                    }
+                    else {
+                        eprintln!("UNK VALUE: frame_buff_info.realheight = {} frame_buff_info.realwidth = {}", frame_buff_info.realheight, frame_buff_info.realwidth);
+                        eprintln!("UNK VALUE: frame_buff_info.frameformat.format = {:?} frame_buff_info.frameformat.width = {} frame_buff_info.frameformat.height = {}",
+                                frame_buff_info.frameformat.format, frame_buff_info.frameformat.width, frame_buff_info.frameformat.height);
+                        eprintln!("Expected Xbgr8888 formatted pixels");
                     }
                 }
                 Ok(None) => {
@@ -371,6 +401,11 @@ impl State {
             }
         }
         eprintln!("screenshot_px.len() = {}", screenshot_px.len());
+        if screenshot_px.len() > 0 {
+            self.last_screenshot_px.clear();
+            self.last_screenshot_px.append(&mut screenshot_px);
+            // screenshot_px is now empty
+        }
     }
 
 }

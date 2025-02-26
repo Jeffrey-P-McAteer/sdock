@@ -360,7 +360,8 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
             (dock_top_x_inset * ratio) as i32
         );
     }
-    //eprintln!("dock_x_insets = {:?}", dock_x_insets);
+
+    const SHADOW_W_PX: i32 = 16;
 
     for y in 0..buf_y {
         for x in 0..begin_x {
@@ -368,18 +369,37 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
         }
         for x in begin_x..end_x {
             if x > dock_x_insets[y as usize] as u32 + begin_x as u32 && x < end_x - dock_x_insets[y as usize] as u32 {
-                let screenshot_reflected_y = screenshot_y_above_dock_dist - y;
-                let x_correction_amount = (dock_w / 2) + 6; // Ok genius where are we being offset by w/2 and six pixels?!/???
-                let screenshot_px_i = ((screenshot_reflected_y * dock_w) + x + x_correction_amount) as usize;
-                if screenshot_px_i > 0 && screenshot_px_i < screenshot_px.len() {
-                    buf.write_all(&screenshot_px[screenshot_px_i]).map_err(err::eloc!())?;
+                // We are within the "dock" area - but we use the first interior SHADOW_W_PX as an alpha ramp-up from transparent to the actual edge.
+                let dist_to_left_edge = (x as i32 - dock_x_insets[y as usize]) - dock_lr_margin as i32;
+                let dist_to_right_edge = (end_x as i32 - dock_x_insets[y as usize] as i32) - x as i32;
+                if dist_to_left_edge < SHADOW_W_PX {
+                    let linear_shadow_a = ((dist_to_left_edge as f32 / SHADOW_W_PX as f32) * 255.0) as u8;
+                    buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, linear_shadow_a]).map_err(err::eloc!())?;
+                }
+                else if dist_to_left_edge == SHADOW_W_PX || dist_to_left_edge == SHADOW_W_PX+1 {
+                    buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, 0xFF as u8]).map_err(err::eloc!())?;
+                }
+                else if dist_to_right_edge < SHADOW_W_PX {
+                    let linear_shadow_a = ((dist_to_right_edge as f32 / SHADOW_W_PX as f32) * 255.0) as u8;
+                    buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, linear_shadow_a]).map_err(err::eloc!())?;
+                }
+                else if dist_to_right_edge == SHADOW_W_PX || dist_to_right_edge == SHADOW_W_PX+1 {
+                    buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, 0xFF as u8]).map_err(err::eloc!())?;
                 }
                 else {
-                    let a = 0xE0;
-                    let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-                    let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
-                    let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
-                    buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+                    let screenshot_reflected_y = screenshot_y_above_dock_dist - y;
+                    let x_correction_amount = (dock_w / 2) + 6; // Ok genius where are we being offset by w/2 and six pixels?!/???
+                    let screenshot_px_i = ((screenshot_reflected_y * dock_w) + x + x_correction_amount) as usize;
+                    if screenshot_px_i > 0 && screenshot_px_i < screenshot_px.len() {
+                        buf.write_all(&screenshot_px[screenshot_px_i]).map_err(err::eloc!())?;
+                    }
+                    else {
+                        let a = 0xE0;
+                        let r = min(((buf_x - x) * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                        let g = min((x * 0xFF) / buf_x, ((buf_y - y) * 0xFF) / buf_y);
+                        let b = min(((buf_x - x) * 0xFF) / buf_x, (y * 0xFF) / buf_y);
+                        buf.write_all(&[b as u8, g as u8, r as u8, a as u8]).map_err(err::eloc!())?;
+                    }
                 }
             }
             else {

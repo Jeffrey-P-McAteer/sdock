@@ -383,9 +383,12 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
                     // Make a linear shadow, skipping the first + last SHADOW_W_PX of X space
                     if dist_to_left_edge < SHADOW_W_PX || dist_to_right_edge < SHADOW_W_PX {
                         // Circular fall-off or some such shadow nonsense
-                        let dist_to_x_corner = std::cmp::min(dist_to_left_edge, dist_to_right_edge);
+                        let dist_to_x_corner = SHADOW_W_PX - std::cmp::min(dist_to_left_edge, dist_to_right_edge);
                         let dist_to_y_corner = dist_to_y_edge;
-                        buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, 0x00 as u8]).map_err(err::eloc!())?;
+                        //let dist_to_corner = ((dist_to_x_corner*dist_to_x_corner) as f32 + (dist_to_y_corner*dist_to_y_corner) as f32).sqrt() as i32;
+                        let dist_to_corner = ((dist_to_x_corner*dist_to_x_corner) as f32 + (dist_to_y_corner*dist_to_y_corner) as f32).sqrt() as i32;
+                        let shadow_amnt = 255.0 - ((dist_to_corner as f32 / SHADOW_W_PX as f32) * 255.0);
+                        buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, shadow_amnt as u8]).map_err(err::eloc!())?;
                     }
                     else {
                         let linear_shadow_a = ((1.0 - (dist_to_y_edge as f32 / SHADOW_W_PX as f32)) * 255.0) as u8;

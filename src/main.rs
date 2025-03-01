@@ -64,7 +64,7 @@ fn do_special_wm_configs() {
     //std::thread::sleep(std::time::Duration::from_millis(300));
     let _s = std::process::Command::new("swaymsg")
         // float, move resize to 100% by 12%, move to x=0, y=80% // sticky enable
-        .args(&["for_window [app_id=\"sdock\"] floating enable, for_window [app_id=\"sdock\"] resize set width 100ppt height 9ppt, for_window [app_id=\"sdock\"] move position 0 92ppt, for_window [app_id=\"sdock\"] sticky enable"])
+        .args(&["for_window [app_id=\"sdock\"] floating enable, for_window [app_id=\"sdock\"] resize set width 100ppt height 12ppt, for_window [app_id=\"sdock\"] move position 0 89ppt, for_window [app_id=\"sdock\"] sticky enable"])
         .status();
 }
 
@@ -326,6 +326,23 @@ impl State {
 
 }
 
+fn shadow_falloff_f(dist_to_edge: f32) -> u8 {
+    return ((dist_to_edge as f32 / SHADOW_W_PX as f32) * 255.0) as u8;
+}
+
+fn shadow_falloff_i(dist_to_edge: i32) -> u8 {
+    return ((dist_to_edge as f32 / SHADOW_W_PX as f32) * 255.0) as u8;
+    //return (( (dist_to_edge as f32 / 3.46).powf(2.0) / SHADOW_W_PX as f32) * 255.0) as u8;
+    //return (( (dist_to_edge as f32 / 5.23).powf(3.0) / SHADOW_W_PX as f32) * 255.0) as u8;
+}
+
+const SHADOW_W_PX: i32 = 24;
+const METAL_TEXTURE_OVLY: [u8; 16] = [
+    8,  12, 16, 12,
+    4,  8,  12,  8,
+    8,  4,  8,   4,
+    12, 8,  12,  8,
+];
 
 fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
     use std::{cmp::min, io::Write};
@@ -361,14 +378,6 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
         );
     }
 
-    const SHADOW_W_PX: i32 = 16;
-    const METAL_TEXTURE_OVLY: [u8; 16] = [
-        8,  12, 16, 12,
-        4,  8,  12,  8,
-        8,  4,  8,   4,
-        12, 8,  12,  8,
-    ];
-
     for y in 0..buf_y {
         let dist_to_y_edge = SHADOW_W_PX - y as i32;
         for x in 0..begin_x {
@@ -387,8 +396,9 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
                         let dist_to_y_corner = dist_to_y_edge;
                         //let dist_to_corner = ((dist_to_x_corner*dist_to_x_corner) as f32 + (dist_to_y_corner*dist_to_y_corner) as f32).sqrt() as i32;
                         let dist_to_corner = ((dist_to_x_corner*dist_to_x_corner) as f32 + (dist_to_y_corner*dist_to_y_corner) as f32).sqrt() as i32;
-                        let shadow_amnt = 255.0 - ((dist_to_corner as f32 / SHADOW_W_PX as f32) * 255.0);
-                        buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, shadow_amnt as u8]).map_err(err::eloc!())?;
+                        //let shadow_amnt = 255.0 - ((dist_to_corner as f32 / SHADOW_W_PX as f32) * 255.0);
+                        let shadow_amnt = 255 - shadow_falloff_i(dist_to_corner);
+                        buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, shadow_amnt]).map_err(err::eloc!())?;
                     }
                     else {
                         let linear_shadow_a = ((1.0 - (dist_to_y_edge as f32 / SHADOW_W_PX as f32)) * 255.0) as u8;
@@ -396,14 +406,14 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
                     }
                 }
                 else if dist_to_left_edge < SHADOW_W_PX {
-                    let linear_shadow_a = ((dist_to_left_edge as f32 / SHADOW_W_PX as f32) * 255.0) as u8;
+                    let linear_shadow_a = shadow_falloff_i(dist_to_left_edge);
                     buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, linear_shadow_a]).map_err(err::eloc!())?;
                 }
                 else if dist_to_left_edge == SHADOW_W_PX {
                     buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, 0xFF as u8]).map_err(err::eloc!())?;
                 }
                 else if dist_to_right_edge < SHADOW_W_PX {
-                    let linear_shadow_a = ((dist_to_right_edge as f32 / SHADOW_W_PX as f32) * 255.0) as u8;
+                    let linear_shadow_a = shadow_falloff_i(dist_to_right_edge);
                     buf.write_all(&[0x00 as u8, 0x00 as u8, 0x00 as u8, linear_shadow_a]).map_err(err::eloc!())?;
                 }
                 else if dist_to_right_edge == SHADOW_W_PX {
@@ -414,7 +424,8 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
                     let x_correction_amount = (dock_w / 2) + 6; // Ok genius where are we being offset by w/2 and six pixels?!/???
                     let screenshot_px_i = ((screenshot_reflected_y * dock_w) + x + x_correction_amount) as usize;
 
-                    let metal_overlay_val = METAL_TEXTURE_OVLY[(((y % 4) * 4) + (x % 4)) as usize];
+                    //let metal_overlay_val = METAL_TEXTURE_OVLY[(((y % 4) * 4) + (x % 4)) as usize];
+                    let metal_overlay_val = 0;
 
                     if screenshot_px_i > 0 && screenshot_px_i < screenshot_px.len() {
                         let mut b = screenshot_px[screenshot_px_i][0];

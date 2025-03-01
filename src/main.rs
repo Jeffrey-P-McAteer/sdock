@@ -346,6 +346,11 @@ const METAL_TEXTURE_OVLY: [u8; 16] = [
 
 fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (u32, u32)) -> Result<(), Box<dyn std::error::Error>> {
     use std::{cmp::min, io::Write};
+
+    if buf_x < 12 || buf_y < 12 {
+        return Ok(());
+    }
+
     let mut buf = std::io::BufWriter::new(tmp);
 
     let dock_w = buf_x / 2;
@@ -484,6 +489,55 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
         }
     }
 
+    // Blur the shadows by re-processing & avreaging a 2x2 grid
+    for y in 0..buf_y {
+        let dist_to_y_edge = SHADOW_W_PX - y as i32;
+        for x in begin_x..end_x {
+            let buf_i = ((y * buf_x) + x) as usize;
+
+            let buf_i_north = ((std::cmp::max(0, y as i32 - 1) * buf_x as i32) + x as i32) as usize;
+            let buf_i_south = ((std::cmp::min(buf_y-1, y+1) * buf_x) + x) as usize;
+            let buf_i_west = std::cmp::max(0, ((y * buf_x) + x) as i32 - 1 as i32) as usize;
+            let buf_i_east = ((y * buf_x) + x + 1) as usize;
+
+            //println!("{x} {y} to {buf_y} {buf_x} ; {buf_i_north} {buf_i_south} {buf_i_west} {buf_i_east}");
+            assert!(buf_i_north < px_buf.len());
+            assert!(buf_i_south < px_buf.len());
+            assert!(buf_i_west < px_buf.len());
+            assert!(buf_i_east < px_buf.len());
+
+            if x > dock_x_insets[y as usize] as u32 + begin_x as u32 && x < end_x - dock_x_insets[y as usize] as u32 {
+                // We are within the "dock" area - but we use the first interior SHADOW_W_PX as an alpha ramp-up from transparent to the actual edge.
+                let dist_to_left_edge = (x as i32 - dock_x_insets[y as usize]) - dock_lr_margin as i32;
+                let dist_to_right_edge = (end_x as i32 - dock_x_insets[y as usize] as i32) - x as i32;
+                if dist_to_y_edge > 0 && dist_to_y_edge <= SHADOW_W_PX {
+                    // Make a linear shadow, skipping the first + last SHADOW_W_PX of X space
+                    if dist_to_left_edge < SHADOW_W_PX || dist_to_right_edge < SHADOW_W_PX {
+                        px_buf[buf_i][3] = ((px_buf[buf_i_north][3] as i32 + px_buf[buf_i_south][3] as i32 + px_buf[buf_i_west][3] as i32 + px_buf[buf_i_east][3] as i32) / 4) as u8;
+                    }
+                    else {
+                        px_buf[buf_i][3] = ((px_buf[buf_i_north][3] as i32 + px_buf[buf_i_south][3] as i32 + px_buf[buf_i_west][3] as i32 + px_buf[buf_i_east][3] as i32) / 4) as u8;
+                    }
+                }
+                else if dist_to_left_edge < SHADOW_W_PX {
+                    px_buf[buf_i][3] = ((px_buf[buf_i_north][3] as i32 + px_buf[buf_i_south][3] as i32 + px_buf[buf_i_west][3] as i32 + px_buf[buf_i_east][3] as i32) / 4) as u8;
+                }
+                else if dist_to_left_edge == SHADOW_W_PX {
+                    //px_buf[buf_i] = [0x00 as u8, 0x00 as u8, 0x00 as u8, 0xFF as u8];
+                }
+                else if dist_to_right_edge < SHADOW_W_PX {
+                    px_buf[buf_i][3] = ((px_buf[buf_i_north][3] as i32 + px_buf[buf_i_south][3] as i32 + px_buf[buf_i_west][3] as i32 + px_buf[buf_i_east][3] as i32) / 4) as u8;
+                }
+                else if dist_to_right_edge == SHADOW_W_PX {
+                    //px_buf[buf_i] = [0x00 as u8, 0x00 as u8, 0x00 as u8, 0xFF as u8];
+                }
+            }
+        }
+    }
+
+
+
+    // Final write to shared-memory buffer
     for i in 0..px_buf.len() {
         buf.write_all(&px_buf[i]).map_err(err::eloc!())?;
     }

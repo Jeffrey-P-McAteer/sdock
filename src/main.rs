@@ -105,7 +105,7 @@ impl Default for State {
             configured_h: 1,
             configured_w: 1,
             haruhi_shot: libharuhishot::HaruhiShotState::init(),
-            last_screenshot_px: vec![],
+            last_screenshot_px: Vec::with_capacity(1920 * ((1200*80)/100) * 2), // Guess at a monitor size, take last 20% of space + double estimate. Yay heuristics for performance!
         }
     }
 }
@@ -273,7 +273,7 @@ impl State {
 
         //eprintln!("size = {:?}", (dock_w as i32, (self.configured_h + screenshot_y_above_dock_dist) as i32));
 
-        let mut screenshot_px = Vec::<[u8; 4]>::new(); // Screenshot turns into array of [b as u8, g as u8, r as u8, a as u8] values
+        let mut screenshot_px = Vec::<[u8; 4]>::with_capacity((self.configured_w * self.configured_h) as usize); // Screenshot turns into array of [b as u8, g as u8, r as u8, a as u8] values
         if let Ok(ref mut haruhi_shot) = self.haruhi_shot {
             match haruhi_shot.capture_output_frame(
                 &haruhi_shot.displays[0].clone(),
@@ -293,9 +293,9 @@ impl State {
                                 let frame_px_i = (((y * frame_buff_info.frameformat.width) + x) * 4) as usize;
 
                                 screenshot_px.push([
-                                    frame_px[frame_px_i+2],
-                                    frame_px[frame_px_i+1],
-                                    frame_px[frame_px_i+0],
+                                    unsafe { *frame_px.get_unchecked(frame_px_i+2) },
+                                    unsafe { *frame_px.get_unchecked(frame_px_i+1) },
+                                    unsafe { *frame_px.get_unchecked(frame_px_i+0) },
                                     0xFF as u8
                                 ]);
                             }

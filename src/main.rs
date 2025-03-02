@@ -316,7 +316,6 @@ impl State {
                 }
             }
         }
-        eprintln!("screenshot_px.len() = {}", screenshot_px.len());
         if screenshot_px.len() > 0 {
             self.last_screenshot_px.clear();
             self.last_screenshot_px.append(&mut screenshot_px);
@@ -331,9 +330,16 @@ fn shadow_falloff_f(dist_to_edge: f32) -> u8 {
 }
 
 fn shadow_falloff_i(dist_to_edge: i32) -> u8 {
-    return ((dist_to_edge as f32 / SHADOW_W_PX as f32) * 255.0) as u8;
+    return ((dist_to_edge as f32 / SHADOW_W_PX as f32) * 255.0).round() as u8;
     //return (( (dist_to_edge as f32 / 3.46).powf(2.0) / SHADOW_W_PX as f32) * 255.0) as u8;
     //return (( (dist_to_edge as f32 / 5.23).powf(3.0) / SHADOW_W_PX as f32) * 255.0) as u8;
+    //return (( ( (dist_to_edge as f32 - 1.0) * 8.0).powf(0.6) / SHADOW_W_PX as f32) * 255.0) as u8;
+    //return ((dist_to_edge as f32 / SHADOW_W_PX as f32) * 220.0).round() as u8;
+    /*
+    return (-646000.0 +
+                (646020.0 / (1.0 + ( -(dist_to_edge as f32 - SHADOW_W_PX as f32) / 349550000.0).powf(0.6474334) ) )
+    ).round() as u8;
+    */
 }
 
 const SHADOW_W_PX: i32 = 24;

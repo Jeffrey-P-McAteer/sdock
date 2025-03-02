@@ -538,9 +538,11 @@ fn static_draw(screenshot_px: &Vec::<[u8; 4]>, tmp: &mut File, (buf_x, buf_y): (
 
 
     // Final write to shared-memory buffer
-    for i in 0..px_buf.len() {
-        buf.write_all(&px_buf[i]).map_err(err::eloc!())?;
-    }
+    // We hereby assume the end of one interior [u8;4] is next to the following [u8;4],
+    // allowing us to re-interpret px_buf as abuffer of bytes which may be written to the
+    // memory-mapped file.
+    let px_buff_bytes: &[u8] = unsafe { std::slice::from_raw_parts(px_buf.as_ptr() as *const u8, px_buf.len() * 4) };
+    buf.write_all(&px_buff_bytes).map_err(err::eloc!())?;
 
     buf.flush().map_err(err::eloc!())?;
     Ok(())

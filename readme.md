@@ -14,6 +14,9 @@ Architcture:
    - Either OS-agnostic OR linux-x64 only tests suitable for rendering previews and confirming the physical rendering attributes of the system.
    - Imports `./sdock` and simulates events into it instead of connecting to real OS events and hardware.
 
+# Research
+
+ - https://github.com/jasonherald/nwg-dock
 
 
 # Building

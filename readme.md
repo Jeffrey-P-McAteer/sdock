@@ -1,7 +1,7 @@
 
 # Skeuomorphic Dock
 
-`sdock` is a dock reminiscient of Apple's MacOS Dock from the 2009-2014 era.
+`sdock` is a cross-platform dock reminiscient of Apple's Skeuomorphic MacOS Dock from the 2009-2014 era.
 
 Architcture:
 

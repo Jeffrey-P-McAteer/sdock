@@ -1,5 +1,5 @@
-/**
- *  sdock - an experimental environment for traveling salesman solution analysis
+/*
+ *  sdock - a cross-platform dock reminiscient of Apple's Skeuomorphic MacOS Dock from the 2009-2014 era
  *  Copyright (C) 2026  Jeffrey McAteer <jeffrey@jmcateer.com>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -15,6 +15,8 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
+
+
 
 
 

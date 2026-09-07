@@ -1,0 +1,12 @@
+[package]
+name = 'sdock'
+version = '0.1.0'
+authors = [
+  'Jeffrey McAteer <jeffrey-dev@jmcateer.com>',
+]
+edition = '2024'
+license = "GPL-2.0-only"
+
+[lib]
+name = "sdock"
+path = "src/lib.rs"
